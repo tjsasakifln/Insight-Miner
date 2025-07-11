@@ -1,12 +1,14 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import Annotated
 
-from .database import SessionLocal, engine, Base, User, create_db_and_tables, AuditLog
+from .database import SessionLocal, engine, Base, User, create_db_and_tables, AuditLog, UploadHistory
 from .auth import get_password_hash, verify_password, create_access_token, decode_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from .sentiment_analysis import sentiment_analyzer
+from .schemas import UserCreate, User, Token, UploadHistory as UploadHistorySchema
+from .celery_worker import celery_app, process_file_task
 from loguru import logger
 
 app = FastAPI()
@@ -50,7 +52,7 @@ def check_role(required_role: str):
 
 # Audit logging function
 def log_audit_event(db: Session, user_id: int, action: str, details: str = None):
-    audit_log = AuditLog(timestamp=str(datetime.utcnow()), user_id=user_id, action=action, details=details)
+    audit_log = AuditLog(timestamp=datetime.utcnow(), user_id=user_id, action=action, details=details)
     db.add(audit_log)
     db.commit()
     db.refresh(audit_log)
@@ -64,17 +66,17 @@ def on_startup():
 async def read_root():
     return {"message": "Welcome to Insight Miner Backend!"}
 
-@app.post("/register")
-async def register_user(username: str, email: str, password: str, db: Session = Depends(get_db)):
-    hashed_password = get_password_hash(password)
-    db_user = User(username=username, email=email, hashed_password=hashed_password)
+@app.post("/register", response_model=User)
+async def register_user(user: UserCreate, db: Session = Depends(get_db)):
+    hashed_password = get_password_hash(user.password)
+    db_user = User(username=user.username, email=user.email, hashed_password=hashed_password)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    log_audit_event(db, db_user.id, "user_registration", f"New user registered: {username}")
-    return {"message": "User registered successfully"}
+    log_audit_event(db, db_user.id, "user_registration", f"New user registered: {user.username}")
+    return db_user
 
-@app.post("/token")
+@app.post("/token", response_model=Token)
 async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -91,10 +93,25 @@ async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm,
     log_audit_event(db, user.id, "user_login", f"User logged in: {user.username}")
     return {"access_token": access_token, "token_type": "bearer"}
 
-@app.post("/upload")
-async def upload_file(current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
-    log_audit_event(db, current_user.id, "file_upload", f"User {current_user.username} uploaded a file.")
-    return {"message": "File upload endpoint (not yet implemented)", "user": current_user.username}
+@app.post("/upload", response_model=UploadHistorySchema)
+async def upload_file(file: UploadFile = File(...), current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+    # Save the file temporarily
+    file_location = f"./uploaded_files/{file.filename}"
+    os.makedirs(os.path.dirname(file_location), exist_ok=True)
+    with open(file_location, "wb+") as file_object:
+        file_object.write(file.file.read())
+
+    # Record upload history
+    upload_entry = UploadHistory(file_name=file.filename, uploader_id=current_user.id, status="processing")
+    db.add(upload_entry)
+    db.commit()
+    db.refresh(upload_entry)
+
+    # Dispatch to Celery for async processing
+    process_file_task.delay(file_location, upload_entry.id)
+
+    log_audit_event(db, current_user.id, "file_upload", f"User {current_user.username} uploaded file {file.filename}. Task dispatched.")
+    return upload_entry
 
 @app.post("/analyze_sentiment")
 async def analyze_sentiment(text: str, current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):

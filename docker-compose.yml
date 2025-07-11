@@ -9,6 +9,7 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ./backend/uploaded_files:/app/uploaded_files
     depends_on:
       - db
       - redis
@@ -46,6 +47,21 @@ services:
     image: redis:latest
     ports:
       - "6379:6379"
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A celery_worker.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+      - ./backend/uploaded_files:/app/uploaded_files
+    depends_on:
+      - redis
+      - db
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/insight_miner
+      REDIS_URL: redis://redis:6379/0
 
 volumes:
   postgres_data:

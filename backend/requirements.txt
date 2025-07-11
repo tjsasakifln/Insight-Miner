@@ -9,3 +9,5 @@ google-cloud-language
 boto3
 redis
 asyncio
+celery
+pydantic
