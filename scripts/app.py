@@ -16,12 +16,12 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def main():
     st.set_page_config(layout="wide")
-    st.title("Dashboard da Voz do Cliente")
+    st.title("Customer Voice Dashboard")
 
     # File uploader
     uploaded_file = st.file_uploader(
-        "Faça o upload de um arquivo CSV", type=["csv"],
-        help="O arquivo CSV deve ter as colunas: reviewer_name, date, rating, review_text, source"
+        "Upload a CSV file", type=["csv"],
+        help="The CSV file must have the following columns: reviewer_name, date, rating, review_text, source"
     )
 
     if uploaded_file is not None:
@@ -64,47 +64,47 @@ def main():
         negative_reviews_count = len(df[df['sentiment_label'] == 'negative'])
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de Reviews", total_reviews)
-        col2.metric("Nota Média", f"{average_rating:.2f}")
-        col3.metric("Reviews Positivos", positive_reviews_count)
-        col4.metric("Reviews Negativos", negative_reviews_count)
+        col1.metric("Total Reviews", total_reviews)
+        col2.metric("Average Rating", f"{average_rating:.2f}")
+        col3.metric("Positive Reviews", positive_reviews_count)
+        col4.metric("Negative Reviews", negative_reviews_count)
 
         # --- Charts ---
-        st.header("Análise Visual")
+        st.header("Visual Analysis")
 
         # Sentiment Timeline
         df['date'] = pd.to_datetime(df['date'])
         sentiment_over_time = df.groupby('date')['sentiment'].mean().reset_index()
-        st.subheader("Linha do Tempo do Sentimento")
+        st.subheader("Sentiment Timeline")
         st.line_chart(sentiment_over_time.rename(columns={'date':'index'}).set_index('index'))
 
         # Topic Distribution
         topic_dist = df['topic_name'].value_counts()
-        st.subheader("Distribuição de Tópicos")
+        st.subheader("Topic Distribution")
         st.bar_chart(topic_dist)
 
         # Word Clouds
-        st.subheader("Nuvens de Palavras")
+        st.subheader("Word Clouds")
         positive_reviews = " ".join(df[df['sentiment_label'] == 'positive']['review_text'])
         negative_reviews = " ".join(df[df['sentiment_label'] == 'negative']['review_text'])
 
         col1, col2 = st.columns(2)
         with col1:
-            st.text("Tópicos Positivos")
+            st.text("Positive Topics")
             if positive_reviews:
                 wordcloud_pos = WordCloud(width=800, height=400, background_color='white').generate(positive_reviews)
                 st.image(wordcloud_pos.to_array())
         with col2:
-            st.text("Tópicos Negativos")
+            st.text("Negative Topics")
             if negative_reviews:
                 wordcloud_neg = WordCloud(width=800, height=400, background_color='white').generate(negative_reviews)
                 st.image(wordcloud_neg.to_array())
 
         # --- GPT-4 Summary ---
-        st.header("Resumo com GPT-4")
-        if st.button("Gerar Resumo"):
-            with st.spinner("Gerando resumo..."):
-                prompt = f"Resuma os seguintes insights de reviews de clientes em três frases curtas: {df.to_string()}"
+        st.header("GPT-4 Summary")
+        if st.button("Generate Summary"):
+            with st.spinner("Generating summary..."):
+                prompt = f"Summarize the following customer review insights in three short sentences: {df.to_string()}"
                 try:
                     response = openai.Completion.create(
                         engine="text-davinci-003", # Or a different model
@@ -113,10 +113,10 @@ def main():
                     )
                     st.success(response.choices[0].text.strip())
                 except Exception as e:
-                    st.error(f"Erro ao contatar a API da OpenAI: {e}")
+                    st.error(f"Error contacting OpenAI API: {e}")
 
         # --- Data Table ---
-        st.header("Dados")
+        st.header("Data")
         st.dataframe(df)
 
 if __name__ == "__main__":

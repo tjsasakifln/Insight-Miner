@@ -1,61 +1,61 @@
 # Insight Miner
 
-## Problema
+## Problem
 
-Empresas coletam feedback de clientes de diversas fontes, mas extrair insights acionáveis desses dados pode ser um processo lento e manual. A análise manual de milhares de reviews é impraticável, e as equipes de produto e marketing perdem a oportunidade de entender rapidamente as necessidades e frustrações dos clientes.
+Companies collect customer feedback from various sources, but extracting actionable insights from this data can be a slow and manual process. Manually analyzing thousands of reviews is impractical, and product and marketing teams miss the opportunity to quickly understand customer needs and frustrations.
 
-## Solução
+## Solution
 
-O Insight Miner é um dashboard interativo que automatiza a análise de feedback de clientes. Ele utiliza processamento de linguagem natural (NLP) para identificar tendências de sentimento, extrair os principais tópicos de discussão e visualizar os dados de forma clara e concisa. Com o Insight Miner, as empresas podem:
+Insight Miner is an interactive dashboard that automates the analysis of customer feedback. It uses natural language processing (NLP) to identify sentiment trends, extract key discussion topics, and visualize the data in a clear and concise way. With Insight Miner, companies can:
 
-*   **Centralizar o feedback:** Faça o upload de um arquivo CSV com os reviews dos seus clientes.
-*   **Analisar o sentimento:** Entenda rapidamente se os clientes estão satisfeitos ou insatisfeitos.
-*   **Extrair tópicos:** Descubra os principais temas de conversa dos seus clientes.
-*   **Visualizar os dados:** Explore os dados através de gráficos interativos e nuvens de palavras.
-*   **Obter resumos com IA:** Gere resumos concisos dos insights com o poder do GPT-4.
+*   **Centralize feedback:** Upload a CSV file with your customer reviews.
+*   **Analyze sentiment:** Quickly understand if customers are satisfied or dissatisfied.
+*   **Extract topics:** Discover the main topics of conversation for your customers.
+*   **Visualize data:** Explore data through interactive charts and word clouds.
+*   **Get AI-powered summaries:** Generate concise summaries of insights with the power of GPT-4.
 
-## Como Executar Localmente
+## How to Run Locally
 
-1.  **Clone o repositório:**
+1.  **Clone the repository:**
 
     ```bash
-    git clone https://github.com/seu-usuario/insight-miner.git
-    cd insight-miner
+    git clone https://github.com/tjsasakifln/Insight-Miner.git
+    cd Insight-Miner
     ```
 
-2.  **Crie e ative o ambiente virtual:**
+2.  **Create and activate the virtual environment:**
 
     ```bash
     python -m venv .venv
-    # No Windows
+    # On Windows
     .venv\Scripts\activate
-    # No macOS/Linux
+    # On macOS/Linux
     source .venv/bin/activate
     ```
 
-3.  **Instale as dependências:**
+3.  **Install the dependencies:**
 
     ```bash
     pip install -r requirements.txt
     ```
 
-4.  **Crie um arquivo `.env`** na raiz do projeto e adicione sua chave da API da OpenAI:
+4.  **Create a `.env` file** in the project root and add your OpenAI API key:
 
     ```
-    OPENAI_API_KEY=sua-chave-aqui
+    OPENAI_API_KEY=your-key-here
     ```
 
-5.  **Execute o aplicativo:**
+5.  **Run the application:**
 
     ```bash
     streamlit run scripts/app.py
     ```
 
-## Integrações Futuras
+## Future Integrations
 
-*   **Google NLP:** Integração com a API de Natural Language do Google para análise de sentimento e extração de entidades mais avançada.
-*   **Amazon Comprehend:** Utilização do Amazon Comprehend para análise de texto em larga escala.
+*   **Google NLP:** Integration with the Google Natural Language API for more advanced sentiment analysis and entity extraction.
+*   **Amazon Comprehend:** Use of Amazon Comprehend for large-scale text analysis.
 
 ---
 
-**Quer isso rodando na sua empresa? Fale comigo.**
+**Want this running in your company? Talk to me.**
