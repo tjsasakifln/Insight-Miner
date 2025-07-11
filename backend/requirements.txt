@@ -11,3 +11,5 @@ redis
 asyncio
 celery
 pydantic
+websockets
+python-dotenv

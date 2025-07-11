@@ -20,6 +20,10 @@ services:
       AWS_ACCESS_KEY_ID: your_aws_access_key_id # Placeholder
       AWS_SECRET_ACCESS_KEY: your_aws_secret_access_key # Placeholder
       AWS_REGION_NAME: us-east-1 # Placeholder
+      EMAIL_USERNAME: your_email@example.com # Placeholder
+      EMAIL_PASSWORD: your_email_password # Placeholder
+      EMAIL_SERVER: smtp.example.com # Placeholder
+      EMAIL_PORT: 587 # Placeholder
 
   frontend:
     build:
@@ -62,6 +66,10 @@ services:
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/insight_miner
       REDIS_URL: redis://redis:6379/0
+      EMAIL_USERNAME: your_email@example.com # Placeholder
+      EMAIL_PASSWORD: your_email_password # Placeholder
+      EMAIL_SERVER: smtp.example.com # Placeholder
+      EMAIL_PORT: 587 # Placeholder
 
 volumes:
   postgres_data:

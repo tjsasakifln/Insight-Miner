@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from typing import Annotated
+import os
 
 from .database import SessionLocal, engine, Base, User, create_db_and_tables, AuditLog, UploadHistory
 from .auth import get_password_hash, verify_password, create_access_token, decode_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -12,6 +13,27 @@ from .celery_worker import celery_app, process_file_task
 from loguru import logger
 
 app = FastAPI()
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
 
 # Dependency to get DB session
 def get_db():
@@ -108,7 +130,7 @@ async def upload_file(file: UploadFile = File(...), current_user: Annotated[User
     db.refresh(upload_entry)
 
     # Dispatch to Celery for async processing
-    process_file_task.delay(file_location, upload_entry.id)
+    process_file_task.delay(file_location, upload_entry.id, current_user.email)
 
     log_audit_event(db, current_user.id, "file_upload", f"User {current_user.username} uploaded file {file.filename}. Task dispatched.")
     return upload_entry
@@ -133,3 +155,14 @@ async def extract_topics(current_user: Annotated[User, Depends(get_current_user)
 async def generate_report(current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):
     log_audit_event(db, current_user.id, "report_generation", f"Admin {current_user.username} generated a report.")
     return {"message": "Report generation endpoint (not yet implemented)", "user": current_user.username}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text() # Keep connection alive
+            # You can add logic here to handle messages from the client if needed
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        logger.info("WebSocket disconnected")
