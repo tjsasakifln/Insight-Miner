@@ -71,5 +71,26 @@ services:
       EMAIL_SERVER: smtp.example.com # Placeholder
       EMAIL_PORT: 587 # Placeholder
 
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command: 
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   postgres_data:
+  grafana_data:

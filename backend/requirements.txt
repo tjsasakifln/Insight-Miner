@@ -13,3 +13,13 @@ celery
 pydantic
 websockets
 python-dotenv
+slowapi
+prometheus_client
+pytest
+pytest-mock
+httpx
+locust
+bandit
+safety
+coverage
+pandas

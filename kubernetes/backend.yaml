@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: insight-miner-backend:latest # Replace with your image registry/tag
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          value: postgresql://user:password@db-service:5432/insight_miner
+        - name: REDIS_URL
+          value: redis://redis-service:6379/0
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /app/google-credentials.json # Mount as secret
+        - name: AWS_ACCESS_KEY_ID
+          value: your_aws_access_key_id # Mount as secret
+        - name: AWS_SECRET_ACCESS_KEY
+          value: your_aws_secret_access_key # Mount as secret
+        - name: AWS_REGION_NAME
+          value: us-east-1
+        - name: EMAIL_USERNAME
+          value: your_email@example.com # Mount as secret
+        - name: EMAIL_PASSWORD
+          value: your_email_password # Mount as secret
+        - name: EMAIL_SERVER
+          value: smtp.example.com
+        - name: EMAIL_PORT
+          value: "587"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  selector:
+    app: backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000

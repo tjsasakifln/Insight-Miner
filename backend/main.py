@@ -1,18 +1,40 @@
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, WebSocket, WebSocketDisconnect, Request, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from typing import Annotated
 import os
+from dotenv import load_dotenv
+import redis.asyncio as redis
+import uuid
+from prometheus_client import generate_latest, Counter, Histogram
+import pandas as pd
+import io
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_ipaddr
+from slowapi.errors import RateLimitExceeded
 
 from .database import SessionLocal, engine, Base, User, create_db_and_tables, AuditLog, UploadHistory
 from .auth import get_password_hash, verify_password, create_access_token, decode_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from .sentiment_analysis import sentiment_analyzer
-from .schemas import UserCreate, User, Token, UploadHistory as UploadHistorySchema
+from .schemas import UserCreate, User, Token, UploadHistory as UploadHistorySchema, AnalysisMetadataCreate
 from .celery_worker import celery_app, process_file_task
 from loguru import logger
 
+load_dotenv() # Load environment variables from .env file
+
+limiter = Limiter(key_func=get_ipaddr, default_limits=["100/minute"])
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Prometheus Metrics
+REQUEST_COUNT = Counter('http_requests_total', 'Total HTTP Requests', ['method', 'endpoint'])
+REQUEST_LATENCY = Histogram('http_request_duration_seconds', 'HTTP Request Latency', ['method', 'endpoint'])
+UPLOAD_COUNT = Counter('file_uploads_total', 'Total File Uploads')
+SENTIMENT_ANALYSIS_COUNT = Counter('sentiment_analysis_total', 'Total Sentiment Analysis Requests')
+ERROR_COUNT = Counter('http_errors_total', 'Total HTTP Errors', ['method', 'endpoint', 'status_code'])
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -34,6 +56,40 @@ class ConnectionManager:
             await connection.send_text(message)
 
 manager = ConnectionManager()
+
+# Middleware for structured logging and trace_id and Prometheus metrics
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = datetime.now()
+    trace_id = str(uuid.uuid4())
+    with logger.contextualize(trace_id=trace_id):
+        current_user = None
+        try:
+            # Attempt to get current user from token for logging purposes
+            token = request.headers.get("Authorization", "").replace("Bearer ", "")
+            if token:
+                payload = decode_access_token(token)
+                if payload and "sub" in payload:
+                    db = SessionLocal()
+                    current_user = db.query(User).filter(User.username == payload["sub"]).first()
+                    db.close()
+        except Exception as e:
+            logger.warning(f"Could not decode token in middleware: {e}")
+
+        if current_user:
+            with logger.contextualize(user_id=current_user.id):
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
+
+        process_time = (datetime.now() - start_time).total_seconds()
+        REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path).inc()
+        REQUEST_LATENCY.labels(method=request.method, endpoint=request.url.path).observe(process_time)
+        if response.status_code >= 400:
+            ERROR_COUNT.labels(method=request.method, endpoint=request.url.path, status_code=response.status_code).inc()
+
+        logger.info(f"Request finished: {request.method} {request.url.path} - {process_time:.4f}s")
+        return response
 
 # Dependency to get DB session
 def get_db():
@@ -85,23 +141,54 @@ def on_startup():
     create_db_and_tables()
 
 @app.get("/")
-async def read_root():
+@limiter.limit("5/second")
+async def read_root(request: Request):
+    logger.info("Root endpoint accessed.")
     return {"message": "Welcome to Insight Miner Backend!"}
 
+@app.get("/metrics")
+async def metrics():
+    return Response(content=generate_latest(), media_type="text/plain")
+
+@app.get("/health/live")
+async def health_live():
+    logger.info("Liveness check performed.")
+    return {"status": "ok"}
+
+@app.get("/health/ready")
+async def health_ready(db: Session = Depends(get_db)):
+    try:
+        # Check PostgreSQL connection
+        db.execute("SELECT 1")
+
+        # Check Redis connection
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"))
+        await r.ping()
+
+        logger.info("Readiness check successful.")
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service not ready: {e}")
+
 @app.post("/register", response_model=User)
-async def register_user(user: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register_user(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     hashed_password = get_password_hash(user.password)
     db_user = User(username=user.username, email=user.email, hashed_password=hashed_password)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     log_audit_event(db, db_user.id, "user_registration", f"New user registered: {user.username}")
+    logger.info(f"User {user.username} registered successfully.")
     return db_user
 
 @app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login_for_access_token(request: Request, form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
+        logger.warning(f"Failed login attempt for user: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -113,15 +200,30 @@ async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm,
         expires_delta=access_token_expires
     )
     log_audit_event(db, user.id, "user_login", f"User logged in: {user.username}")
+    logger.info(f"User {user.username} logged in successfully.")
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/upload", response_model=UploadHistorySchema)
-async def upload_file(file: UploadFile = File(...), current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def upload_file(request: Request, file: UploadFile = File(...), current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+    UPLOAD_COUNT.inc()
+    # Read the uploaded file content
+    contents = await file.read()
+    file_stream = io.StringIO(contents.decode('utf-8'))
+
+    # Validate CSV format and required columns
+    try:
+        df = pd.read_csv(file_stream)
+        if "review_text" not in df.columns:
+            raise HTTPException(status_code=400, detail="CSV must contain a 'review_text' column.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV file or format: {e}")
+
     # Save the file temporarily
     file_location = f"./uploaded_files/{file.filename}"
     os.makedirs(os.path.dirname(file_location), exist_ok=True)
     with open(file_location, "wb+") as file_object:
-        file_object.write(file.file.read())
+        file_object.write(contents)
 
     # Record upload history
     upload_entry = UploadHistory(file_name=file.filename, uploader_id=current_user.id, status="processing")
@@ -133,27 +235,37 @@ async def upload_file(file: UploadFile = File(...), current_user: Annotated[User
     process_file_task.delay(file_location, upload_entry.id, current_user.email)
 
     log_audit_event(db, current_user.id, "file_upload", f"User {current_user.username} uploaded file {file.filename}. Task dispatched.")
+    logger.info(f"File {file.filename} uploaded by user {current_user.username}. Task dispatched to Celery.")
     return upload_entry
 
 @app.post("/analyze_sentiment")
-async def analyze_sentiment(text: str, current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def analyze_sentiment(request: Request, text: str, current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):
+    SENTIMENT_ANALYSIS_COUNT.inc()
     log_audit_event(db, current_user.id, "sentiment_analysis", f"Admin {current_user.username} performed sentiment analysis on: {text}")
     try:
         result = await sentiment_analyzer.analyze_sentiment(text)
+        logger.info(f"Sentiment analysis completed for text: {text}")
         return {"message": "Sentiment analysis completed", "result": result, "user": current_user.username}
     except HTTPException as e:
+        logger.error(f"Sentiment analysis failed for text: {text} - {e.detail}")
         raise e
     except Exception as e:
+        logger.error(f"Sentiment analysis failed for text: {text} - {e}")
         raise HTTPException(status_code=500, detail=f"Sentiment analysis failed: {e}")
 
 @app.post("/extract_topics")
-async def extract_topics(current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def extract_topics(request: Request, current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
     log_audit_event(db, current_user.id, "topic_extraction", f"User {current_user.username} extracted topics.")
+    logger.info(f"Topic extraction requested by user {current_user.username}.")
     return {"message": "Topic extraction endpoint (not yet implemented)", "user": current_user.username}
 
 @app.post("/generate_report")
-async def generate_report(current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):
+@limiter.limit("2/minute")
+async def generate_report(request: Request, current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):
     log_audit_event(db, current_user.id, "report_generation", f"Admin {current_user.username} generated a report.")
+    logger.info(f"Report generation requested by admin {current_user.username}.")
     return {"message": "Report generation endpoint (not yet implemented)", "user": current_user.username}
 
 @app.websocket("/ws")
