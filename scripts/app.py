@@ -14,6 +14,20 @@ load_dotenv()
 # Load the OpenAI API key from the environment variable
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+@st.cache_data
+def get_topics(data, n_topics=5):
+    vectorizer = CountVectorizer(max_df=0.95, min_df=2, stop_words='english')
+    doc_term_matrix = vectorizer.fit_transform(data)
+    lda = LatentDirichletAllocation(n_components=n_topics, random_state=42)
+    lda.fit(doc_term_matrix)
+    return lda, vectorizer
+
+def display_topics(model, feature_names, n_top_words):
+    topics = []
+    for topic_idx, topic in enumerate(model.components_):
+        topics.append(" ".join([feature_names[i] for i in topic.argsort()[:-n_top_words - 1:-1]]))
+    return topics
+
 def main():
     st.set_page_config(layout="wide")
     st.title("Customer Voice Dashboard")
@@ -35,22 +49,7 @@ def main():
         df['sentiment_label'] = df['sentiment'].apply(lambda x: 'positive' if x >= 0.05 else ('negative' if x <= -0.05 else 'neutral'))
 
         # Topic Extraction
-        @st.cache_data
-        def get_topics(data, n_topics=5):
-            vectorizer = CountVectorizer(max_df=0.95, min_df=2, stop_words='english')
-            doc_term_matrix = vectorizer.fit_transform(data)
-            lda = LatentDirichletAllocation(n_components=n_topics, random_state=42)
-            lda.fit(doc_term_matrix)
-            return lda, vectorizer
-
         lda_model, vectorizer = get_topics(df['review_text'])
-
-        def display_topics(model, feature_names, n_top_words):
-            topics = []
-            for topic_idx, topic in enumerate(model.components_):
-                topics.append(" ".join([feature_names[i] for i in topic.argsort()[:-n_top_words - 1:-1]]))
-            return topics
-
         df['topic'] = lda_model.transform(vectorizer.transform(df['review_text'])).argmax(axis=1)
         topic_names = display_topics(lda_model, vectorizer.get_feature_names_out(), 5)
         df['topic_name'] = df['topic'].apply(lambda x: topic_names[x])
