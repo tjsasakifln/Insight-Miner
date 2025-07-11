@@ -1,0 +1,7 @@
+streamlit
+pandas
+nltk
+scikit-learn
+wordcloud
+openai
+python-dotenv
