@@ -13,6 +13,7 @@ services:
     depends_on:
       - db
       - redis
+      - jaeger
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/insight_miner
       REDIS_URL: redis://redis:6379/0
@@ -24,6 +25,8 @@ services:
       EMAIL_PASSWORD: your_email_password # Placeholder
       EMAIL_SERVER: smtp.example.com # Placeholder
       EMAIL_PORT: 587 # Placeholder
+      JAEGER_AGENT_HOST: jaeger
+      JAEGER_AGENT_PORT: 6831
 
   frontend:
     build:
@@ -63,6 +66,7 @@ services:
     depends_on:
       - redis
       - db
+      - jaeger
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/insight_miner
       REDIS_URL: redis://redis:6379/0
@@ -70,6 +74,8 @@ services:
       EMAIL_PASSWORD: your_email_password # Placeholder
       EMAIL_SERVER: smtp.example.com # Placeholder
       EMAIL_PORT: 587 # Placeholder
+      JAEGER_AGENT_HOST: jaeger
+      JAEGER_AGENT_PORT: 6831
 
   prometheus:
     image: prom/prometheus
@@ -90,6 +96,12 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "6831:6831/udp"
+      - "16686:16686"
 
 volumes:
   postgres_data:

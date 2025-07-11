@@ -20,12 +20,40 @@ from .auth import get_password_hash, verify_password, create_access_token, decod
 from .sentiment_analysis import sentiment_analyzer
 from .schemas import UserCreate, User, Token, UploadHistory as UploadHistorySchema, AnalysisMetadataCreate
 from .celery_worker import celery_app, process_file_task
+from .openai_integration import openai_integration
 from loguru import logger
+
+# OpenTelemetry imports
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.jaeger.proto.grpc import JaegerExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
 load_dotenv() # Load environment variables from .env file
 
-limiter = Limiter(key_func=get_ipaddr, default_limits=["100/minute"])
+# Configure OpenTelemetry
+resource = Resource.create({"service.name": "insight-miner-backend"})
+tracer_provider = TracerProvider(resource=resource)
+trace.set_tracer_provider(tracer_provider)
+
+jaeger_exporter = JaegerExporter(
+    agent_host_name=os.getenv("JAEGER_AGENT_HOST", "jaeger"),
+    agent_port=int(os.getenv("JAEGER_AGENT_PORT", 6831)),
+)
+span_processor = BatchSpanProcessor(jaeger_exporter)
+tracer_provider.add_span_processor(span_processor)
+
+# Instrument FastAPI
 app = FastAPI()
+FastAPIInstrumentor.instrument_app(app)
+
+# Instrument SQLAlchemy
+SQLAlchemyInstrumentor().instrument(engine=engine)
+
+limiter = Limiter(key_func=get_ipaddr, default_limits=["100/minute"])
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -56,40 +84,6 @@ class ConnectionManager:
             await connection.send_text(message)
 
 manager = ConnectionManager()
-
-# Middleware for structured logging and trace_id and Prometheus metrics
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    start_time = datetime.now()
-    trace_id = str(uuid.uuid4())
-    with logger.contextualize(trace_id=trace_id):
-        current_user = None
-        try:
-            # Attempt to get current user from token for logging purposes
-            token = request.headers.get("Authorization", "").replace("Bearer ", "")
-            if token:
-                payload = decode_access_token(token)
-                if payload and "sub" in payload:
-                    db = SessionLocal()
-                    current_user = db.query(User).filter(User.username == payload["sub"]).first()
-                    db.close()
-        except Exception as e:
-            logger.warning(f"Could not decode token in middleware: {e}")
-
-        if current_user:
-            with logger.contextualize(user_id=current_user.id):
-                response = await call_next(request)
-        else:
-            response = await call_next(request)
-
-        process_time = (datetime.now() - start_time).total_seconds()
-        REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path).inc()
-        REQUEST_LATENCY.labels(method=request.method, endpoint=request.url.path).observe(process_time)
-        if response.status_code >= 400:
-            ERROR_COUNT.labels(method=request.method, endpoint=request.url.path, status_code=response.status_code).inc()
-
-        logger.info(f"Request finished: {request.method} {request.url.path} - {process_time:.4f}s")
-        return response
 
 # Dependency to get DB session
 def get_db():
@@ -267,6 +261,18 @@ async def generate_report(request: Request, current_user: Annotated[User, Depend
     log_audit_event(db, current_user.id, "report_generation", f"Admin {current_user.username} generated a report.")
     logger.info(f"Report generation requested by admin {current_user.username}.")
     return {"message": "Report generation endpoint (not yet implemented)", "user": current_user.username}
+
+@app.post("/summarize")
+@limiter.limit("5/minute")
+async def summarize_text(request: Request, text: str, current_user: Annotated[User, Depends(get_current_user)]):
+    log_audit_event(db, current_user.id, "text_summarization", f"User {current_user.username} requested summary for text: {text[:50]}...")
+    try:
+        summary = await openai_integration.get_chat_completion(f"Summarize the following text: {text}")
+        logger.info(f"Text summarization completed for text: {text[:50]}...")
+        return {"message": "Text summarization completed", "summary": summary, "user": current_user.username}
+    except Exception as e:
+        logger.error(f"Text summarization failed for text: {text[:50]}... - {e}")
+        raise HTTPException(status_code=500, detail=f"Text summarization failed: {e}")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
