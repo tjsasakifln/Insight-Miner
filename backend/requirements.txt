@@ -1,31 +1,90 @@
-fastapi
-uvicorn
-python-jose[cryptography]
-passlib[bcrypt]
-sqlalchemy
-psycopg2-binary
-loguru
-google-cloud-language
-boto3
-redis
-asyncio
-celery
-pydantic
-websockets
-python-dotenv
-slowapi
-prometheus_client
-pytest
-pytest-mock
-httpx
-locust
-bandit
-safety
-coverage
-pandas
-openai
-opentelemetry-api
-opentelemetry-sdk
-opentelemetry-exporter-jaeger
-opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-sqlalchemy
+# Core Framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Authentication & Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+cryptography>=41.0.0
+pyotp>=2.8.0
+qrcode[pil]>=7.4.2
+
+# Database
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+asyncpg>=0.28.0
+
+# Redis & Caching
+redis>=4.6.0
+hiredis>=2.2.3
+
+# Task Queue
+celery>=5.3.0
+kombu>=5.3.0
+
+# External Services
+google-cloud-language>=2.10.0
+boto3>=1.28.0
+botocore>=1.31.0
+openai>=1.0.0
+
+# Logging & Monitoring
+loguru>=0.7.0
+structlog>=23.1.0
+python-json-logger>=2.0.7
+opentelemetry-api>=1.19.0
+opentelemetry-sdk>=1.19.0
+opentelemetry-instrumentation>=0.40b0
+opentelemetry-instrumentation-fastapi>=0.40b0
+opentelemetry-instrumentation-logging>=0.40b0
+opentelemetry-instrumentation-sqlalchemy>=0.40b0
+opentelemetry-instrumentation-redis>=0.40b0
+opentelemetry-instrumentation-requests>=0.40b0
+opentelemetry-exporter-jaeger>=1.19.0
+
+# Performance & Reliability
+tenacity>=8.2.0
+circuitbreaker>=1.4.0
+aiohttp>=3.8.0
+httpx>=0.24.0
+
+# Rate Limiting & Security
+slowapi>=0.1.9
+prometheus_client>=0.17.0
+
+# WebSocket Support
+websockets>=11.0.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Reporting
+reportlab>=4.0.0
+matplotlib>=3.7.0
+pillow>=10.0.0
+
+# Development & Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+pytest-cov>=4.1.0
+coverage>=7.2.0
+httpx>=0.24.0
+
+# Code Quality & Security
+bandit>=1.7.5
+safety>=2.3.0
+black>=23.7.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Load Testing
+locust>=2.16.0
+
+# Documentation
+sphinx>=7.1.0
+sphinx-rtd-theme>=1.3.0

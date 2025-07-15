@@ -15,12 +15,13 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_ipaddr
 from slowapi.errors import RateLimitExceeded
 
-from .database import SessionLocal, engine, Base, User, create_db_and_tables, AuditLog, UploadHistory
+from .database import SessionLocal, engine, Base, User, create_db_and_tables, AuditLog, UploadHistory, AnalysisMetadata
 from .auth import get_password_hash, verify_password, create_access_token, decode_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from .sentiment_analysis import sentiment_analyzer
 from .schemas import UserCreate, User, Token, UploadHistory as UploadHistorySchema, AnalysisMetadataCreate
 from .celery_worker import celery_app, process_file_task
 from .openai_integration import openai_integration
+from .report_generator import generate_pdf_report
 from loguru import logger
 
 # OpenTelemetry imports
@@ -264,7 +265,7 @@ async def generate_report(request: Request, current_user: Annotated[User, Depend
 
 @app.post("/summarize")
 @limiter.limit("5/minute")
-async def summarize_text(request: Request, text: str, current_user: Annotated[User, Depends(get_current_user)]):
+async def summarize_text(request: Request, text: str, current_user: Annotated[User, Depends(get_current_user)], db: Session = Depends(get_db)):
     log_audit_event(db, current_user.id, "text_summarization", f"User {current_user.username} requested summary for text: {text[:50]}...")
     try:
         summary = await openai_integration.get_chat_completion(f"Summarize the following text: {text}")
@@ -273,6 +274,57 @@ async def summarize_text(request: Request, text: str, current_user: Annotated[Us
     except Exception as e:
         logger.error(f"Text summarization failed for text: {text[:50]}... - {e}")
         raise HTTPException(status_code=500, detail=f"Text summarization failed: {e}")
+
+@app.get("/generate_pdf_report")
+@limiter.limit("1/minute")
+async def get_pdf_report(request: Request, current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):
+    log_audit_event(db, current_user.id, "pdf_report_generation", f"Admin {current_user.username} requested PDF report.")
+    try:
+        # Placeholder data for the report
+        report_data = {
+            "report_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_reviews": db.query(AnalysisMetadata).filter(AnalysisMetadata.analysis_type == "sentiment").count(),
+            "positive_reviews": db.query(AnalysisMetadata).filter(AnalysisMetadata.analysis_type == "sentiment", AnalysisMetadata.result_summary.like('%positive%')).count(),
+            "negative_reviews": db.query(AnalysisMetadata).filter(AnalysisMetadata.analysis_type == "sentiment", AnalysisMetadata.result_summary.like('%negative%')).count(),
+            "neutral_reviews": db.query(AnalysisMetadata).filter(AnalysisMetadata.analysis_type == "sentiment", AnalysisMetadata.result_summary.like('%neutral%')).count(),
+            "total_insights": db.query(AnalysisMetadata).count(),
+            "avg_processing_time": "N/A", # Placeholder, would calculate from audit logs or task durations
+            "estimated_roi": "N/A", # Placeholder, would be a business calculation
+            "trending_topics": ["Topic A", "Topic B", "Topic C"] # Placeholder for ML prediction
+        }
+
+        output_pdf_path = "./reports/sentiment_report.pdf"
+        os.makedirs(os.path.dirname(output_pdf_path), exist_ok=True)
+        generate_pdf_report(report_data, output_pdf_path)
+
+        with open(output_pdf_path, "rb") as pdf_file:
+            pdf_content = pdf_file.read()
+
+        logger.info(f"PDF report generated for admin {current_user.username}.")
+        return Response(content=pdf_content, media_type="application/pdf", headers={
+            "Content-Disposition": "attachment; filename=sentiment_report.pdf"
+        })
+    except Exception as e:
+        logger.error(f"Failed to generate PDF report: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF report: {e}")
+
+@app.get("/metrics/business")
+@limiter.limit("5/minute")
+async def get_business_metrics(request: Request, current_user: Annotated[User, Depends(check_role("admin"))], db: Session = Depends(get_db)):
+    log_audit_event(db, current_user.id, "business_metrics_access", f"Admin {current_user.username} accessed business metrics.")
+    total_insights = db.query(AnalysisMetadata).count()
+    # Placeholder for actual calculation
+    avg_processing_time = "N/A"
+    estimated_roi = "N/A"
+    trending_topics = ["Topic A", "Topic B", "Topic C"]
+
+    logger.info(f"Business metrics accessed by admin {current_user.username}.")
+    return {
+        "total_insights_generated": total_insights,
+        "average_processing_time": avg_processing_time,
+        "estimated_roi": estimated_roi,
+        "trending_topics": trending_topics
+    }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
